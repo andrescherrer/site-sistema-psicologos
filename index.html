@@ -2,16 +2,36 @@
 <html lang="pt-br">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Consultório — telas</title>
   <style>
     body { margin: 0; font-family: Georgia, serif; background: #f4f7f6; color: #1c2b27; }
     header { padding: 32px 24px 8px; max-width: 1100px; margin: 0 auto; }
     h1 { font-weight: 500; font-size: 32px; margin: 0 0 8px; }
-    p { color: #5c6b66; }
-    main { max-width: 1100px; margin: 0 auto; padding: 8px 24px 48px; display: grid; gap: 28px; }
-    figure { margin: 0; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
-    img { width: 100%; display: block; }
+    header p { color: #5c6b66; margin: 0; }
+    main { max-width: 1100px; margin: 0 auto; padding: 16px 24px 48px; }
+    .stage { background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+    figure { margin: 0; }
+    .carousel.is-ready figure { display: none; }
+    .carousel.is-ready figure.is-active { display: block; }
+    .frame { max-height: 72vh; overflow: hidden; background: #eef3f1; }
+    img { width: 100%; height: auto; display: block; cursor: zoom-in; }
     figcaption { padding: 12px 16px 16px; font-size: 18px; }
+    .hint { margin: 12px 0 0; color: #5c6b66; font-size: 15px; text-align: center; }
+    .viewer { position: fixed; inset: 0; z-index: 30; background: rgba(18, 26, 24, .94); overflow: hidden; }
+    .viewer[hidden] { display: none; }
+    .viewer img { position: absolute; top: 0; left: 0; width: auto; max-width: none; height: auto; cursor: grab; transform-origin: 0 0; background: white; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+    .viewer img.is-panning { cursor: grabbing; }
+    .viewer-close { position: absolute; top: 16px; right: 16px; z-index: 2; background: white; }
+    .viewer-hint { position: absolute; left: 0; right: 0; bottom: 16px; margin: 0; text-align: center; color: #d5e0dc; pointer-events: none; }
+    .controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
+    .status { margin: 0; color: #5c6b66; font-size: 16px; }
+    button { font: inherit; font-size: 16px; padding: 10px 18px; border-radius: 999px; border: 1px solid #c5d1cc; background: white; color: #1c2b27; cursor: pointer; }
+    button:hover:not(:disabled) { border-color: #1c2b27; }
+    button.next { background: #1c2b27; color: white; border-color: #1c2b27; }
+    button.next:hover:not(:disabled) { background: #2c403a; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    button:focus-visible { outline: 2px solid #1c2b27; outline-offset: 2px; }
   </style>
 </head>
 <body>
@@ -20,6 +40,8 @@
     <p>Telas do sistema, com a clínica de exemplo.</p>
   </header>
   <main>
+    <div class="carousel" id="telas">
+      <div class="stage">
 <figure><img src="01-entrar.png" alt="Entrar"><figcaption>Entrar</figcaption></figure>
 <figure><img src="02-codigo.png" alt="Código do autenticador"><figcaption>Código do autenticador</figcaption></figure>
 <figure><img src="03-ativar-codigo.png" alt="Ativar o aplicativo"><figcaption>Ativar o aplicativo</figcaption></figure>
@@ -71,6 +93,211 @@
 <figure><img src="49-senha.png" alt="Senha e códigos"><figcaption>Senha e códigos</figcaption></figure>
 <figure><img src="50-codigos.png" alt="Códigos de recuperação"><figcaption>Códigos de recuperação</figcaption></figure>
 <figure><img src="51-acesso-negado.png" alt="Acesso negado"><figcaption>Acesso negado</figcaption></figure>
+      </div>
+      <p class="hint" id="dica">Clique na imagem para ampliar. A roda do mouse aumenta ou diminui o zoom.</p>
+      <div class="controls">
+        <button type="button" class="prev" id="anterior" disabled>Anterior</button>
+        <p class="status" id="status" aria-live="polite">1 de 51</p>
+        <button type="button" class="next" id="proximo">Próximo</button>
+      </div>
+    </div>
   </main>
+  <div class="viewer" id="viewer" hidden>
+    <button type="button" class="viewer-close" id="fechar">Fechar</button>
+    <img id="viewer-img" alt="">
+    <p class="viewer-hint">Roda do mouse amplia ou reduz. Arraste para mover.</p>
+  </div>
+  <script>
+    (function () {
+      var root = document.getElementById("telas");
+      var slides = Array.prototype.slice.call(root.querySelectorAll("figure"));
+      var prev = document.getElementById("anterior");
+      var next = document.getElementById("proximo");
+      var status = document.getElementById("status");
+      var stage = root.querySelector(".stage");
+      var viewer = document.getElementById("viewer");
+      var viewerImg = document.getElementById("viewer-img");
+      viewerImg.draggable = false;
+      var index = 0;
+      var viewerOpen = false;
+      var scale = 1;
+      var baseScale = 1;
+      var imgW = 0;
+      var imgH = 0;
+      var tx = 0;
+      var ty = 0;
+      var drag = null;
+      var suppressClick = false;
+
+      slides.forEach(function (slide) {
+        var img = slide.querySelector("img");
+        var frame = document.createElement("div");
+        frame.className = "frame";
+        img.parentNode.insertBefore(frame, img);
+        frame.appendChild(img);
+        img.draggable = false;
+      });
+
+      function activeImage() {
+        return slides[index].querySelector("img");
+      }
+
+      function show(nextIndex) {
+        index = Math.max(0, Math.min(slides.length - 1, nextIndex));
+        slides.forEach(function (slide, i) {
+          slide.classList.toggle("is-active", i === index);
+        });
+        status.textContent = (index + 1) + " de " + slides.length;
+        prev.disabled = index === 0;
+        next.disabled = index === slides.length - 1;
+        var upcoming = slides[index + 1];
+        if (upcoming) {
+          var img = upcoming.querySelector("img");
+          if (img && !img.complete) img.loading = "eager";
+        }
+        if (viewerOpen) openViewer(activeImage());
+      }
+
+      function paint() {
+        viewerImg.style.transform = "translate(" + tx + "px, " + ty + "px) scale(" + scale + ")";
+      }
+
+      function clampPan() {
+        var w = imgW * scale;
+        var h = imgH * scale;
+        var margin = 64;
+        tx = Math.min(window.innerWidth - margin, Math.max(margin - w, tx));
+        ty = Math.min(window.innerHeight - margin, Math.max(margin - h, ty));
+      }
+
+      function layoutFit(naturalW, naturalH) {
+        naturalW = naturalW || viewerImg.naturalWidth;
+        naturalH = naturalH || viewerImg.naturalHeight;
+        if (!naturalW || !naturalH) return;
+        imgW = naturalW;
+        imgH = naturalH;
+        viewerImg.style.width = naturalW + "px";
+        viewerImg.style.height = naturalH + "px";
+        var pad = 32;
+        baseScale = Math.min(naturalW, window.innerWidth - pad * 2) / naturalW;
+        scale = baseScale;
+        var w = naturalW * scale;
+        var h = naturalH * scale;
+        tx = (window.innerWidth - w) / 2;
+        ty = h + pad * 2 > window.innerHeight ? pad : (window.innerHeight - h) / 2;
+        clampPan();
+        paint();
+      }
+
+      function zoomAt(clientX, clientY, nextScale) {
+        var minScale = baseScale * 0.35;
+        var maxScale = baseScale * 6;
+        nextScale = Math.min(maxScale, Math.max(minScale, nextScale));
+        var px = (clientX - tx) / scale;
+        var py = (clientY - ty) / scale;
+        scale = nextScale;
+        tx = clientX - px * scale;
+        ty = clientY - py * scale;
+        clampPan();
+        paint();
+      }
+
+      function openViewer(img) {
+        viewerOpen = true;
+        viewer.hidden = false;
+        document.body.style.overflow = "hidden";
+        viewerImg.alt = img.alt;
+        var src = img.getAttribute("src");
+        if (viewerImg.getAttribute("src") !== src) {
+          viewerImg.onload = function () { layoutFit(); };
+          viewerImg.src = src;
+        }
+        if (img.naturalWidth) layoutFit(img.naturalWidth, img.naturalHeight);
+        else if (viewerImg.complete && viewerImg.naturalWidth) layoutFit();
+      }
+
+      function closeViewer() {
+        viewerOpen = false;
+        viewer.hidden = true;
+        document.body.style.overflow = "";
+        viewerImg.classList.remove("is-panning");
+        drag = null;
+      }
+
+      stage.addEventListener("click", function (event) {
+        var img = event.target.closest("img");
+        if (!img || img !== activeImage()) return;
+        openViewer(img);
+      });
+
+      viewer.addEventListener("wheel", function (event) {
+        if (!viewerOpen) return;
+        event.preventDefault();
+        var dy = event.deltaY;
+        if (event.deltaMode === 1) dy *= 32;
+        if (event.deltaMode === 2) dy *= window.innerHeight;
+        dy = Math.max(-140, Math.min(140, dy));
+        zoomAt(event.clientX, event.clientY, scale * Math.exp(-dy * 0.0016));
+      }, { passive: false });
+
+      viewer.addEventListener("pointerdown", function (event) {
+        if (event.button !== 0 || event.target !== viewerImg) return;
+        drag = { x: event.clientX, y: event.clientY, tx: tx, ty: ty, moved: false };
+        viewerImg.classList.add("is-panning");
+        try { viewerImg.setPointerCapture(event.pointerId); } catch (e) {}
+      });
+
+      viewer.addEventListener("pointermove", function (event) {
+        if (!drag) return;
+        var dx = event.clientX - drag.x;
+        var dy = event.clientY - drag.y;
+        if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+        tx = drag.tx + dx;
+        ty = drag.ty + dy;
+        clampPan();
+        paint();
+      });
+
+      function endDrag(event) {
+        if (!drag) return;
+        if (drag.moved) suppressClick = true;
+        viewerImg.classList.remove("is-panning");
+        try {
+          if (viewerImg.hasPointerCapture(event.pointerId)) viewerImg.releasePointerCapture(event.pointerId);
+        } catch (e) {}
+        drag = null;
+      }
+
+      viewer.addEventListener("pointerup", endDrag);
+      viewer.addEventListener("pointercancel", endDrag);
+
+      viewer.addEventListener("click", function (event) {
+        if (suppressClick) {
+          suppressClick = false;
+          return;
+        }
+        if (event.target === viewer) closeViewer();
+      });
+
+      document.getElementById("fechar").addEventListener("click", closeViewer);
+
+      prev.addEventListener("click", function () { show(index - 1); });
+      next.addEventListener("click", function () { show(index + 1); });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && viewerOpen) {
+          closeViewer();
+          return;
+        }
+        if (event.key === "ArrowRight") show(index + 1);
+        if (event.key === "ArrowLeft") show(index - 1);
+      });
+      window.addEventListener("resize", function () {
+        if (viewerOpen) layoutFit();
+      });
+
+      root.classList.add("is-ready");
+      show(0);
+    })();
+  </script>
 </body>
 </html>
